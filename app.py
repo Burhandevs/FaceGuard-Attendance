@@ -188,7 +188,7 @@ def recognize():
 
             cv2.imshow('Punch your Attendance', img)
             if cv2.waitKey(1) & 0xFF == 27:
-                break
+                breakf
 
         cap.release()
         cv2.destroyAllWindows()
@@ -197,6 +197,76 @@ def recognize():
         return render_template('main.html')
 
 # Remaining routes and login handling are unchanged.
+@app.route('/login',methods = ['POST'])
+def login():
+    #print( request.headers )
+    json_data = json.loads(request.data.decode())
+    username = json_data['username']
+    password = json_data['password']
+    #print(username,password)
+    df= pd.read_csv('cred.csv')
+    if len(df.loc[df['username'] == username]['password'].values) > 0:
+        if df.loc[df['username'] == username]['password'].values[0] == password:
+            session['username'] = username
+            return 'success'
+        else:
+            return 'failed'
+    else:
+        return 'failed'
+        
+
+
+@app.route('/checklogin')
+def checklogin():
+    #print('here')
+    if 'username' in session:
+        return session['username']
+    return 'False'
+
+
+@app.route('/how',methods=["GET","POST"])
+def how():
+    return render_template('form.html')
+@app.route('/data',methods=["GET","POST"])
+def data():
+    '''user=request.form['username']
+    pass1=request.form['pass']
+    if user=="tech" and pass1=="tech@321" :
+    '''
+    if request.method=="POST":
+        today=date.today()
+        print(today)
+        conn = sqlite3.connect('information.db')
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+        print ("Opened database successfully");
+        cursor = cur.execute("SELECT DISTINCT NAME,Time, Date from Attendance where Date=?",(today,))
+        rows=cur.fetchall()
+        print(rows)
+        for line in cursor:
+
+            data1=list(line)
+        print ("Operation done successfully");
+        conn.close()
+
+        return render_template('form2.html',rows=rows)
+    else:
+        return render_template('form1.html')
+
+
+            
+@app.route('/whole',methods=["GET","POST"])
+def whole():
+    today=date.today()
+    print(today)
+    conn = sqlite3.connect('information.db')
+    conn.row_factory = sqlite3.Row 
+    cur = conn.cursor() 
+    print ("Opened database successfully");
+    cursor = cur.execute("SELECT DISTINCT NAME,Time, Date from Attendance")
+    rows=cur.fetchall()    
+    return render_template('form3.html',rows=rows)
+
 
 if __name__ == '__main__':
     app.run(debug=True)
