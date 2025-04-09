@@ -119,8 +119,7 @@ body{
     text-decoration: none;
 }
 
-.box .form-area .links a:hover,
-.box .form-area .links a:nth-child(2){
+.box .form-area .links a:hover{
     color: #fff;
 }
 
