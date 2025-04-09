@@ -25,9 +25,9 @@ def eye_aspect_ratio(eye):
 
 # Calculate mouth aspect ratio for liveness detection
 def mouth_aspect_ratio(mouth):
-    A = dist.euclidean(mouth[2], mouth[10])  # vertical distance
-    B = dist.euclidean(mouth[4], mouth[8])   # vertical distance
-    C = dist.euclidean(mouth[0], mouth[6])   # horizontal distance
+    A = dist.euclidean(mouth[2], mouth[10])
+    B = dist.euclidean(mouth[4], mouth[8])
+    C = dist.euclidean(mouth[0], mouth[6])
     mar = (A + B) / (2.0 * C)
     return mar
 
@@ -38,7 +38,7 @@ def head_pose(shape):
     right_eye = np.mean([shape[42], shape[43], shape[44], shape[45]], axis=0)
     d1 = dist.euclidean(nose, left_eye)
     d2 = dist.euclidean(nose, right_eye)
-    if d1 > d2 + 5:  # Simple threshold for head turn
+    if d1 > d2 + 5:
         return "left"
     elif d2 > d1 + 5:
         return "right"
@@ -56,36 +56,44 @@ def name():
     if request.method == "POST":
         name1 = request.form['name1']
         name2 = request.form['name2']
+        username_folder = f'Training images/{name1}'
+
+        if not os.path.exists(username_folder):
+            os.makedirs(username_folder)
 
         cam = cv2.VideoCapture(0)
-        img_count = 0  # Count how many images we've captured
-        total_images = 10  # Total images to be captured
+        img_count = 0
+        total_images = 10
 
-        while img_count < total_images:  # Capture 10 images
+        while img_count < total_images:
             ret, frame = cam.read()
             if not ret:
                 print("failed to grab frame")
                 break
 
-            # Display the current image with the counter overlay
             text = f"Captured: {img_count}/{total_images} images"
             cv2.putText(frame, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-
             cv2.imshow("Press Space to capture image", frame)
 
             k = cv2.waitKey(1)
-            if k % 256 == 27:  # ESC key to exit
+            if k % 256 == 27:
                 print("Escape hit, closing...")
                 break
-            elif k % 256 == 32:  # Space key to capture image
-                img_name = f"{name1}_{img_count}.png"  # Save images with index (e.g., name1_0.png)
-                path = 'Training images'
-                cv2.imwrite(os.path.join(path, img_name), frame)
-                print("{} written!".format(img_name))
-                img_count += 1  # Increment image count
+            elif k % 256 == 32:
+                img_name = f"{name1}_{img_count}.png"
+                cv2.imwrite(os.path.join(username_folder, img_name), frame)
+                print(f"{img_name} written!")
+                img_count += 1
 
-        cam.release()  # Release the camera after capturing the required images
+        cam.release()
         cv2.destroyAllWindows()
+
+        conn = sqlite3.connect('information.db')
+        conn.execute('''CREATE TABLE IF NOT EXISTS Users (NAME TEXT)''')
+        conn.execute("INSERT OR IGNORE INTO Users (NAME) VALUES (?)", (name1,))
+        conn.commit()
+        conn.close()
+
         return render_template('image.html')
     else:
         return 'All is not well'
@@ -96,11 +104,15 @@ def recognize():
         path = 'Training images'
         images = []
         classNames = []
-        myList = os.listdir(path)
-        for cl in myList:
-            curImg = cv2.imread(f'{path}/{cl}')
-            images.append(curImg)
-            classNames.append(os.path.splitext(cl)[0])
+        for folder_name in os.listdir(path):
+            folder_path = os.path.join(path, folder_name)
+            if os.path.isdir(folder_path):
+                for img_file in os.listdir(folder_path):
+                    img_path = os.path.join(folder_path, img_file)
+                    img = cv2.imread(img_path)
+                    if img is not None:
+                        images.append(img)
+                        classNames.append(folder_name)
 
         def findEncodings(images):
             encodeList = []
@@ -142,15 +154,13 @@ def recognize():
         cap = cv2.VideoCapture(0)
 
         blink_threshold = 0.25
-        mar_threshold = 0.5  # Adjust as needed
-        head_turn_threshold = 10 # Adjust as needed
+        mar_threshold = 0.5
+        head_turn_threshold = 10
 
         live_frames = 0
         spoof_frames = 0
-        consecutive_live_threshold = 5  # Need to maintain liveness for a few frames
+        consecutive_live_threshold = 5
         consecutive_spoof_threshold = 5
-
-        prev_ear = 0.0
 
         while True:
             success, img = cap.read()
@@ -187,7 +197,6 @@ def recognize():
                 elif d2 > d1 + head_turn_threshold:
                     head_pose_direction = "right"
 
-                # Liveness detection logic
                 if ear > blink_threshold and mar < mar_threshold and head_pose_direction == "center":
                     live = True
                 else:
@@ -197,8 +206,7 @@ def recognize():
                 live_frames += 1
                 spoof_frames = 0
                 if live_frames >= consecutive_live_threshold:
-                    cv2.putText(img, "Live Person Detected", (10, 60),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                    cv2.putText(img, "Live Person Detected", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                     imgS = cv2.resize(img, (0, 0), None, 0.25, 0.25)
                     imgS = cv2.cvtColor(imgS, cv2.COLOR_BGR2RGB)
                     facesCurFrame = face_recognition.face_locations(imgS)
@@ -225,18 +233,15 @@ def recognize():
                         cv2.rectangle(img, (x1, y2 - 35), (x2, y2), (0, 255, 0), cv2.FILLED)
                         cv2.putText(img, name, (x1 + 6, y2 - 6), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
                 else:
-                    cv2.putText(img, "Checking Liveness...", (10, 60),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                    cv2.putText(img, "Checking Liveness...", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             else:
                 spoof_frames += 1
                 live_frames = 0
                 if spoof_frames >= consecutive_spoof_threshold:
-                    cv2.putText(img, "Spoofing Suspected", (10, 30),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                    cv2.putText(img, "Spoofing Suspected", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                 else:
-                    cv2.putText(img, "Checking Liveness...", (10, 30),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                    cv2.putText(img, "Checking Liveness...", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             cv2.imshow('Punch your Attendance', img)
             if cv2.waitKey(1) & 0xFF == 27:
@@ -251,11 +256,9 @@ def recognize():
 # Remaining routes and login handling are unchanged.
 @app.route('/login',methods = ['POST'])
 def login():
-    #print( request.headers )
     json_data = json.loads(request.data.decode())
     username = json_data['username']
     password = json_data['password']
-    #print(username,password)
     df= pd.read_csv('cred.csv')
     if len(df.loc[df['username'] == username]['password'].values) > 0:
         if df.loc[df['username'] == username]['password'].values[0] == password:
@@ -266,57 +269,39 @@ def login():
     else:
         return 'failed'
 
-
 @app.route('/checklogin')
 def checklogin():
-    #print('here')
     if 'username' in session:
         return session['username']
     return 'False'
 
-
 @app.route('/how',methods=["GET","POST"])
 def how():
     return render_template('form.html')
+
 @app.route('/data',methods=["GET","POST"])
 def data():
-    '''user=request.form['username']
-    pass1=request.form['pass']
-    if user=="tech" and pass1=="tech@321" :
-    '''
     if request.method=="POST":
         today=date.today()
-        print(today)
         conn = sqlite3.connect('information.db')
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
-        print ("Opened database successfully");
         cursor = cur.execute("SELECT DISTINCT NAME,Time, Date from Attendance where Date=?",(today,))
         rows=cur.fetchall()
-        print(rows)
-        for line in cursor:
-
-            data1=list(line)
-        print ("Operation done successfully");
         conn.close()
-
         return render_template('form2.html',rows=rows)
     else:
         return render_template('form1.html')
 
-
 @app.route('/whole',methods=["GET","POST"])
 def whole():
     today=date.today()
-    print(today)
     conn = sqlite3.connect('information.db')
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
-    print ("Opened database successfully");
     cursor = cur.execute("SELECT DISTINCT NAME,Time, Date from Attendance")
     rows=cur.fetchall()
     return render_template('form3.html',rows=rows)
-
 
 if __name__ == '__main__':
     app.run(debug=True)
