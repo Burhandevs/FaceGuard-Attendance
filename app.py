@@ -275,7 +275,7 @@ def checklogin():
         return session['username']
     return 'False'
 
-@app.route('/how',methods=["GET","POST"])
+@app.route('/login',methods=["GET","POST"])
 def how():
     return render_template('form.html')
 
