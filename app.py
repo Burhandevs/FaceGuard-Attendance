@@ -10,7 +10,6 @@ import pandas as pd
 from scipy.spatial import distance as dist
 import dlib
 from imutils import face_utils
-from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'
@@ -64,6 +63,7 @@ def name():
         cam = cv2.VideoCapture(0)
         img_count = 0
         total_images = 10
+        captured_images = []
 
         while img_count < total_images:
             ret, frame = cam.read()
@@ -82,11 +82,39 @@ def name():
             elif k % 256 == 32:
                 img_name = f"{name1}_{img_count}.png"
                 cv2.imwrite(os.path.join(username_folder, img_name), frame)
+                captured_images.append(frame)
                 print(f"{img_name} written!")
                 img_count += 1
 
         cam.release()
         cv2.destroyAllWindows()
+
+        # Check if the face is already registered after capturing all images
+        existing_encodings = []
+        for existing_folder in os.listdir('Training images'):
+            for existing_file in os.listdir(os.path.join('Training images', existing_folder)):
+                existing_img_path = os.path.join('Training images', existing_folder, existing_file)
+                existing_img = cv2.imread(existing_img_path)
+                if existing_img is not None:
+                    existing_encode = face_recognition.face_encodings(existing_img)
+                    if existing_encode:
+                        existing_encodings.append(existing_encode[0])
+
+        registered = False
+        for captured_image in captured_images:
+            current_encode = face_recognition.face_encodings(captured_image)
+            if current_encode:
+                matches_count = 0
+                for existing_encode in existing_encodings:
+                    matches = face_recognition.compare_faces([existing_encode], current_encode[0])
+                    if True in matches:
+                        matches_count += 1
+                if matches_count >= 10:
+                    registered = True
+                    break
+
+        if registered:
+            return "Face already registered!"
 
         conn = sqlite3.connect('information.db')
         conn.execute('''CREATE TABLE IF NOT EXISTS Users (NAME TEXT)''')
@@ -100,6 +128,8 @@ def name():
 
 @app.route("/", methods=["GET", "POST"])
 def recognize():
+    # ... (rest of the recognize function remains the same)
+    # ... (rest of the recognize function remains the same)
     if request.method == "POST":
         path = 'Training images'
         images = []
@@ -202,46 +232,46 @@ def recognize():
                 else:
                     live = False
 
-            if live:
-                live_frames += 1
-                spoof_frames = 0
-                if live_frames >= consecutive_live_threshold:
-                    cv2.putText(img, "Live Person Detected", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                    imgS = cv2.resize(img, (0, 0), None, 0.25, 0.25)
-                    imgS = cv2.cvtColor(imgS, cv2.COLOR_BGR2RGB)
-                    facesCurFrame = face_recognition.face_locations(imgS)
-                    encodesCurFrame = face_recognition.face_encodings(imgS, facesCurFrame)
+                if live:
+                    live_frames += 1
+                    spoof_frames = 0
+                    if live_frames >= consecutive_live_threshold:
+                        cv2.putText(img, "Live Person Detected", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                        imgS = cv2.resize(img, (0, 0), None, 0.25, 0.25)
+                        imgS = cv2.cvtColor(imgS, cv2.COLOR_BGR2RGB)
+                        facesCurFrame = face_recognition.face_locations(imgS)
+                        encodesCurFrame = face_recognition.face_encodings(imgS, facesCurFrame)
 
-                    for encodeFace, faceLoc in zip(encodesCurFrame, facesCurFrame):
-                        matches = face_recognition.compare_faces(encodeListKnown, encodeFace)
-                        faceDis = face_recognition.face_distance(encodeListKnown, encodeFace)
-                        matchIndex = np.argmin(faceDis)
+                        for encodeFace, faceLoc in zip(encodesCurFrame, facesCurFrame):
+                            matches = face_recognition.compare_faces(encodeListKnown, encodeFace)
+                            faceDis = face_recognition.face_distance(encodeListKnown, encodeFace)
+                            matchIndex = np.argmin(faceDis)
 
-                        if faceDis[matchIndex] < 0.50:
-                            name = classNames[matchIndex].upper()
-                            markAttendance(name)
-                            markData(name)
-                            cap.release()
-                            cv2.destroyAllWindows()
-                            return render_template('first.html')
-                        else:
-                            name = 'Unknown'
+                            if faceDis[matchIndex] < 0.50:
+                                name = classNames[matchIndex].upper()
+                                markAttendance(name)
+                                markData(name)
+                                cap.release()
+                                cv2.destroyAllWindows()
+                                return render_template('first.html')
+                            else:
+                                name = 'Unknown'
 
-                        y1, x2, y2, x1 = faceLoc
-                        y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
-                        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        cv2.rectangle(img, (x1, y2 - 35), (x2, y2), (0, 255, 0), cv2.FILLED)
-                        cv2.putText(img, name, (x1 + 6, y2 - 6), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
+                            y1, x2, y2, x1 = faceLoc
+                            y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
+                            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                            cv2.rectangle(img, (x1, y2 - 35), (x2, y2), (0, 255, 0), cv2.FILLED)
+                            cv2.putText(img, name, (x1 + 6, y2 - 6), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
+                    else:
+                        cv2.putText(img, "Checking Liveness...", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+
                 else:
-                    cv2.putText(img, "Checking Liveness...", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-
-            else:
-                spoof_frames += 1
-                live_frames = 0
-                if spoof_frames >= consecutive_spoof_threshold:
-                    cv2.putText(img, "Spoofing Suspected", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-                else:
-                    cv2.putText(img, "Checking Liveness...", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                    spoof_frames += 1
+                    live_frames = 0
+                    if spoof_frames >= consecutive_spoof_threshold:
+                        cv2.putText(img, "Spoofing Suspected", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                    else:
+                        cv2.putText(img, "Checking Liveness...", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             cv2.imshow('Punch your Attendance', img)
             if cv2.waitKey(1) & 0xFF == 27:
