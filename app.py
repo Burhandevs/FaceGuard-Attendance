@@ -47,7 +47,7 @@ def head_pose(shape):
 @app.route('/new', methods=['GET', 'POST'])
 def new():
     if request.method == "POST":
-        return render_template('index.html')
+        return render_template('StudentRegister.html')
     else:
         return "Everything is okay!"
 
@@ -277,7 +277,7 @@ def checklogin():
 
 @app.route('/login',methods=["GET","POST"])
 def how():
-    return render_template('form.html')
+    return render_template('AdminLogin.html')
 
 @app.route('/data',methods=["GET","POST"])
 def data():
@@ -289,9 +289,9 @@ def data():
         cursor = cur.execute("SELECT DISTINCT NAME,Time, Date from Attendance where Date=?",(today,))
         rows=cur.fetchall()
         conn.close()
-        return render_template('form2.html',rows=rows)
+        return render_template('TodayAttendance.html',rows=rows)
     else:
-        return render_template('form1.html')
+        return render_template('AdminLogin.html')
 
 @app.route('/whole',methods=["GET","POST"])
 def whole():
@@ -301,7 +301,7 @@ def whole():
     cur = conn.cursor()
     cursor = cur.execute("SELECT DISTINCT NAME,Time, Date from Attendance")
     rows=cur.fetchall()
-    return render_template('form3.html',rows=rows)
+    return render_template('AttendanceList.html',rows=rows)
 
 if __name__ == '__main__':
     app.run(debug=True)
