@@ -154,6 +154,21 @@ body{
 }
 
 
+.blue-btn{
+    background-color: #0fa6c9 !important;
+    color: black !important;
+    border: white !important;
+}
+.blue-btn:hover{
+    background-color: #0887a3 !important;
+    color: black !important;
+    border: grey !important;
+}
+.blue-btn:focus{
+    box-shadow: none !important;
+}
+
+
 .success-animation {
     margin: 150px auto;
 }
