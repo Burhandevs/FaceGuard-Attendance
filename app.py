@@ -10,9 +10,24 @@ import pandas as pd
 from scipy.spatial import distance as dist
 import dlib
 from imutils import face_utils
+from sklearn.metrics import precision_score, f1_score
 
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'
+
+# Initialize performance metrics database
+def init_performance_db():
+    conn = sqlite3.connect('recognition_metrics.db')
+    conn.execute('''CREATE TABLE IF NOT EXISTS RecognitionMetrics 
+                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     name TEXT,
+                     precision REAL,
+                     f1_score REAL,
+                     timestamp TEXT)''')
+    conn.commit()
+    conn.close()
+
+init_performance_db()
 
 # Eye aspect ratio calculation for liveness detection
 def eye_aspect_ratio(eye):
@@ -57,13 +72,39 @@ def name():
         name2 = request.form['name2']
         username_folder = f'Training images/{name1}'
 
-        if not os.path.exists(username_folder):
-            os.makedirs(username_folder)
+        # First check if name already exists in database
+        conn = sqlite3.connect('information.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT NAME FROM Users WHERE NAME=?", (name1,))
+        existing_name = cursor.fetchone()
+        conn.close()
+        
+        if existing_name:
+            return "Name already registered in the system!"
 
+        # Now check face similarity with existing images
+        existing_encodings = []
+        existing_names = []
+        
+        for existing_folder in os.listdir('Training images'):
+            for existing_file in os.listdir(os.path.join('Training images', existing_folder)):
+                existing_img_path = os.path.join('Training images', existing_folder, existing_file)
+                existing_img = cv2.imread(existing_img_path)
+                if existing_img is not None:
+                    existing_encode = face_recognition.face_encodings(existing_img)
+                    if existing_encode:
+                        existing_encodings.append(existing_encode[0])
+                        existing_names.append(existing_folder)
+
+        # Create folder for new user (temporarily)
+        os.makedirs(username_folder, exist_ok=True)
+
+        # Capture new images for comparison
         cam = cv2.VideoCapture(0)
         img_count = 0
         total_images = 10
         captured_images = []
+        captured_encodings = []
 
         while img_count < total_images:
             ret, frame = cam.read()
@@ -81,41 +122,44 @@ def name():
                 break
             elif k % 256 == 32:
                 img_name = f"{name1}_{img_count}.png"
-                cv2.imwrite(os.path.join(username_folder, img_name), frame)
+                img_path = os.path.join(username_folder, img_name)
+                cv2.imwrite(img_path, frame)
                 captured_images.append(frame)
+                
+                # Get encoding of captured image
+                current_encode = face_recognition.face_encodings(frame)
+                if current_encode:
+                    captured_encodings.append(current_encode[0])
+                
                 print(f"{img_name} written!")
                 img_count += 1
 
         cam.release()
         cv2.destroyAllWindows()
 
-        # Check if the face is already registered after capturing all images
-        existing_encodings = []
-        for existing_folder in os.listdir('Training images'):
-            for existing_file in os.listdir(os.path.join('Training images', existing_folder)):
-                existing_img_path = os.path.join('Training images', existing_folder, existing_file)
-                existing_img = cv2.imread(existing_img_path)
-                if existing_img is not None:
-                    existing_encode = face_recognition.face_encodings(existing_img)
-                    if existing_encode:
-                        existing_encodings.append(existing_encode[0])
-
+        # Check if face is already registered (regardless of name)
         registered = False
-        for captured_image in captured_images:
-            current_encode = face_recognition.face_encodings(captured_image)
-            if current_encode:
-                matches_count = 0
-                for existing_encode in existing_encodings:
-                    matches = face_recognition.compare_faces([existing_encode], current_encode[0])
-                    if True in matches:
-                        matches_count += 1
-                if matches_count >= 10:
+        registered_name = None
+        if existing_encodings and captured_encodings:
+            for cap_encode in captured_encodings:
+                matches = face_recognition.compare_faces(existing_encodings, cap_encode, tolerance=0.5)
+                if True in matches:
+                    match_idx = matches.index(True)
+                    registered_name = existing_names[match_idx]
                     registered = True
                     break
 
         if registered:
-            return "Face already registered!"
+            # Delete the newly captured images since this is a duplicate
+            try:
+                for img_file in os.listdir(username_folder):
+                    os.remove(os.path.join(username_folder, img_file))
+                os.rmdir(username_folder)
+            except FileNotFoundError:
+                pass  # Folder was already deleted or never created
+            return f"Face already registered in the system (under name: {registered_name})!"
 
+        # If not registered, proceed with saving to database
         conn = sqlite3.connect('information.db')
         conn.execute('''CREATE TABLE IF NOT EXISTS Users (NAME TEXT)''')
         conn.execute("INSERT OR IGNORE INTO Users (NAME) VALUES (?)", (name1,))
@@ -128,8 +172,6 @@ def name():
 
 @app.route("/", methods=["GET", "POST"])
 def recognize():
-    # ... (rest of the recognize function remains the same)
-    # ... (rest of the recognize function remains the same)
     if request.method == "POST":
         path = 'Training images'
         images = []
@@ -173,7 +215,16 @@ def recognize():
                     dtString = now.strftime('%H:%M')
                     f.write(f'\n{name},{dtString}')
 
+        def store_recognition_metrics(name, precision, f1):
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            conn = sqlite3.connect('recognition_metrics.db')
+            conn.execute("INSERT INTO RecognitionMetrics (name, precision, f1_score, timestamp) VALUES (?, ?, ?, ?)",
+                        (name, precision, f1, timestamp))
+            conn.commit()
+            conn.close()
+
         encodeListKnown = findEncodings(images)
+        known_names = classNames
 
         detector = dlib.get_frontal_face_detector()
         predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
@@ -191,6 +242,10 @@ def recognize():
         spoof_frames = 0
         consecutive_live_threshold = 5
         consecutive_spoof_threshold = 5
+        
+        # For performance metrics
+        true_labels = []
+        predicted_labels = []
 
         while True:
             success, img = cap.read()
@@ -246,9 +301,23 @@ def recognize():
                             matches = face_recognition.compare_faces(encodeListKnown, encodeFace)
                             faceDis = face_recognition.face_distance(encodeListKnown, encodeFace)
                             matchIndex = np.argmin(faceDis)
+                            
+                            # For performance metrics
+                            true_label = known_names[matchIndex] if matches[matchIndex] else "Unknown"
+                            predicted_label = known_names[matchIndex] if faceDis[matchIndex] < 0.50 else "Unknown"
+                            
+                            true_labels.append(true_label)
+                            predicted_labels.append(predicted_label)
 
                             if faceDis[matchIndex] < 0.50:
-                                name = classNames[matchIndex].upper()
+                                name = known_names[matchIndex].upper()
+                                
+                                # Calculate metrics only when marking attendance
+                                if len(set(true_labels)) > 1:  # Need at least 2 classes
+                                    precision = precision_score(true_labels, predicted_labels, average='weighted', zero_division=0)
+                                    f1 = f1_score(true_labels, predicted_labels, average='weighted', zero_division=0)
+                                    store_recognition_metrics(name, precision, f1)
+                                
                                 markAttendance(name)
                                 markData(name)
                                 cap.release()
@@ -283,7 +352,6 @@ def recognize():
     else:
         return render_template('main.html')
 
-# Remaining routes and login handling are unchanged.
 @app.route('/login',methods = ['POST'])
 def login():
     json_data = json.loads(request.data.decode())
@@ -332,6 +400,16 @@ def whole():
     cursor = cur.execute("SELECT DISTINCT NAME,Time, Date from Attendance")
     rows=cur.fetchall()
     return render_template('AttendanceList.html',rows=rows)
+
+@app.route('/metrics')
+def view_metrics():
+    conn = sqlite3.connect('recognition_metrics.db')
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cursor = cur.execute("SELECT name, precision, f1_score, timestamp FROM RecognitionMetrics ORDER BY timestamp DESC")
+    metrics = cur.fetchall()
+    conn.close()
+    return render_template('RecognitionMetrics.html', metrics=metrics)
 
 if __name__ == '__main__':
     app.run(debug=True)
