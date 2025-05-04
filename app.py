@@ -12,6 +12,8 @@ import dlib
 from imutils import face_utils
 from sklearn.metrics import precision_score, f1_score
 
+import time
+
 app = Flask(__name__)
 app.secret_key = 'supersecretkey'
 
@@ -173,6 +175,31 @@ def name():
 @app.route("/", methods=["GET", "POST"])
 def recognize():
     if request.method == "POST":
+        # Initialize databases first
+        def initialize_databases():
+            # Initialize Attendance database
+            conn_attendance = sqlite3.connect('information.db')
+            conn_attendance.execute('''CREATE TABLE IF NOT EXISTS Attendance 
+                                    (NAME TEXT, Time TEXT, Date TEXT, UNIQUE(NAME, Date))''')
+            conn_attendance.commit()
+            conn_attendance.close()
+            
+            # Initialize Metrics database
+            conn_metrics = sqlite3.connect('recognition_metrics.db')
+            conn_metrics.execute('''CREATE TABLE IF NOT EXISTS RecognitionMetrics 
+                                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                                   name TEXT,
+                                   precision REAL,
+                                   recall REAL,
+                                   f1_score REAL,
+                                   accuracy REAL,
+                                   timestamp TEXT)''')
+            conn_metrics.commit()
+            conn_metrics.close()
+        
+        initialize_databases()
+
+        # Load training images
         path = 'Training images'
         images = []
         classNames = []
@@ -195,33 +222,64 @@ def recognize():
                     encodeList.append(encodes[0])
             return encodeList
 
+        def check_attendance_status(name):
+            today = date.today()
+            conn = sqlite3.connect('information.db')
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM Attendance WHERE NAME = ? AND Date = ?", (name, today))
+                result = cursor.fetchone()
+                return result is not None
+            finally:
+                conn.close()
+
         def markData(name):
+            if check_attendance_status(name):
+                return False
+                
             now = datetime.now()
             dtString = now.strftime('%H:%M')
             today = date.today()
+            
             conn = sqlite3.connect('information.db')
-            conn.execute('''CREATE TABLE IF NOT EXISTS Attendance (NAME TEXT, Time TEXT, Date TEXT)''')
-            conn.execute("INSERT OR IGNORE INTO Attendance (NAME, Time, Date) VALUES (?, ?, ?)", (name, dtString, today))
-            conn.commit()
-            conn.close()
+            try:
+                conn.execute("INSERT INTO Attendance (NAME, Time, Date) VALUES (?, ?, ?)", 
+                           (name, dtString, today))
+                conn.commit()
+                return True
+            except sqlite3.IntegrityError:
+                return False
+            finally:
+                conn.close()
 
-        def markAttendance(name):
-            with open('attendance.csv', 'a+', errors='ignore') as f:
-                f.seek(0)
-                myDataList = f.readlines()
-                nameList = [line.split(',')[0] for line in myDataList]
-                if name not in nameList:
-                    now = datetime.now()
-                    dtString = now.strftime('%H:%M')
-                    f.write(f'\n{name},{dtString}')
-
-        def store_recognition_metrics(name, precision, f1):
+        def store_recognition_metrics(name, precision, recall, f1, accuracy):
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             conn = sqlite3.connect('recognition_metrics.db')
-            conn.execute("INSERT INTO RecognitionMetrics (name, precision, f1_score, timestamp) VALUES (?, ?, ?, ?)",
-                        (name, precision, f1, timestamp))
-            conn.commit()
-            conn.close()
+            try:
+                conn.execute("INSERT INTO RecognitionMetrics (name, precision, recall, f1_score, accuracy, timestamp) VALUES (?, ?, ?, ?, ?, ?)",
+                            (name, precision, recall, f1, accuracy, timestamp))
+                conn.commit()
+            finally:
+                conn.close()
+
+        def detect_screen(frame):
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray = cv2.GaussianBlur(gray, (5, 5), 0)
+            edged = cv2.Canny(gray, 50, 200)
+            
+            contours, _ = cv2.findContours(edged.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            contours = sorted(contours, key=cv2.contourArea, reverse=True)[:5]
+            
+            screen_detected = False
+            for contour in contours:
+                peri = cv2.arcLength(contour, True)
+                approx = cv2.approxPolyDP(contour, 0.02 * peri, True)
+                
+                if len(approx) == 4:
+                    screen_detected = True
+                    break
+            
+            return screen_detected
 
         encodeListKnown = findEncodings(images)
         known_names = classNames
@@ -243,15 +301,34 @@ def recognize():
         consecutive_live_threshold = 5
         consecutive_spoof_threshold = 5
         
-        # For performance metrics
         true_labels = []
         predicted_labels = []
+        confidence_scores = []
+        
+        already_marked_timeout = 0
+        timeout_started = False
 
         while True:
             success, img = cap.read()
             if not success:
                 print("Failed to grab frame")
                 break
+
+            if timeout_started:
+                current_time = time.time()
+                if current_time - already_marked_timeout >= 15:
+                    cap.release()
+                    cv2.destroyAllWindows()
+                    return render_template('first.html')
+                continue
+
+            screen_detected = detect_screen(img)
+            if screen_detected:
+                cv2.putText(img, "SCREEN DETECTED - SPOOFING ATTEMPT", (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                cv2.imshow('Punch your Attendance', img)
+                cv2.waitKey(2000)
+                continue
 
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             rects = detector(gray, 0)
@@ -282,7 +359,10 @@ def recognize():
                 elif d2 > d1 + head_turn_threshold:
                     head_pose_direction = "right"
 
-                if ear > blink_threshold and mar < mar_threshold and head_pose_direction == "center":
+                if (ear > blink_threshold and 
+                    mar < mar_threshold and 
+                    head_pose_direction == "center" and
+                    rect.width() > 100):
                     live = True
                 else:
                     live = False
@@ -291,7 +371,8 @@ def recognize():
                     live_frames += 1
                     spoof_frames = 0
                     if live_frames >= consecutive_live_threshold:
-                        cv2.putText(img, "Live Person Detected", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+                        cv2.putText(img, "Live Person Detected", (10, 60), 
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                         imgS = cv2.resize(img, (0, 0), None, 0.25, 0.25)
                         imgS = cv2.cvtColor(imgS, cv2.COLOR_BGR2RGB)
                         facesCurFrame = face_recognition.face_locations(imgS)
@@ -302,27 +383,38 @@ def recognize():
                             faceDis = face_recognition.face_distance(encodeListKnown, encodeFace)
                             matchIndex = np.argmin(faceDis)
                             
-                            # For performance metrics
                             true_label = known_names[matchIndex] if matches[matchIndex] else "Unknown"
                             predicted_label = known_names[matchIndex] if faceDis[matchIndex] < 0.50 else "Unknown"
                             
                             true_labels.append(true_label)
                             predicted_labels.append(predicted_label)
+                            confidence_scores.append(1 - faceDis[matchIndex])
 
                             if faceDis[matchIndex] < 0.50:
                                 name = known_names[matchIndex].upper()
                                 
-                                # Calculate metrics only when marking attendance
-                                if len(set(true_labels)) > 1:  # Need at least 2 classes
-                                    precision = precision_score(true_labels, predicted_labels, average='weighted', zero_division=0)
-                                    f1 = f1_score(true_labels, predicted_labels, average='weighted', zero_division=0)
-                                    store_recognition_metrics(name, precision, f1)
+                                if check_attendance_status(name):
+                                    cv2.putText(img, f"{name}: Attendance already marked today", 
+                                               (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                                    cv2.putText(img, "Closing in 15 seconds...", (10, 120),
+                                               cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                                    cv2.imshow('Punch your Attendance', img)
+                                    if not timeout_started:
+                                        already_marked_timeout = time.time()
+                                        timeout_started = True
+                                    continue
                                 
-                                markAttendance(name)
-                                markData(name)
-                                cap.release()
-                                cv2.destroyAllWindows()
-                                return render_template('first.html')
+                                if len(set(true_labels)) > 1:
+                                    precision = precision_score(true_labels, predicted_labels, average='weighted', zero_division=0)
+                                    recall = recall_score(true_labels, predicted_labels, average='weighted', zero_division=0)
+                                    f1 = f1_score(true_labels, predicted_labels, average='weighted', zero_division=0)
+                                    accuracy = accuracy_score(true_labels, predicted_labels)
+                                    store_recognition_metrics(name, precision, recall, f1, accuracy)
+                                
+                                if markData(name):
+                                    cap.release()
+                                    cv2.destroyAllWindows()
+                                    return render_template('first.html')
                             else:
                                 name = 'Unknown'
 
@@ -330,17 +422,21 @@ def recognize():
                             y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
                             cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
                             cv2.rectangle(img, (x1, y2 - 35), (x2, y2), (0, 255, 0), cv2.FILLED)
-                            cv2.putText(img, name, (x1 + 6, y2 - 6), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
+                            cv2.putText(img, name, (x1 + 6, y2 - 6), 
+                                       cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
                     else:
-                        cv2.putText(img, "Checking Liveness...", (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                        cv2.putText(img, "Checking Liveness...", (10, 60), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
                 else:
                     spoof_frames += 1
                     live_frames = 0
                     if spoof_frames >= consecutive_spoof_threshold:
-                        cv2.putText(img, "Spoofing Suspected", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+                        cv2.putText(img, "Spoofing Suspected", (10, 30), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                     else:
-                        cv2.putText(img, "Checking Liveness...", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+                        cv2.putText(img, "Checking Liveness...", (10, 30), 
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
 
             cv2.imshow('Punch your Attendance', img)
             if cv2.waitKey(1) & 0xFF == 27:
@@ -401,15 +497,151 @@ def whole():
     rows=cur.fetchall()
     return render_template('AttendanceList.html',rows=rows)
 
+# @app.route('/metrics')
+# def view_metrics():
+#     conn = sqlite3.connect('recognition_metrics.db')
+#     conn.row_factory = sqlite3.Row
+#     cur = conn.cursor()
+#     cursor = cur.execute("SELECT name, precision, f1_score, timestamp FROM RecognitionMetrics ORDER BY timestamp DESC")
+#     metrics = cur.fetchall()
+#     conn.close()
+#     return render_template('RecognitionMetrics.html', metrics=metrics)
+
+
+def initialize_databases():
+    # Initialize Metrics database with all required columns
+    conn = sqlite3.connect('recognition_metrics.db')
+    try:
+        # Create table with all columns if it doesn't exist
+        conn.execute('''CREATE TABLE IF NOT EXISTS RecognitionMetrics 
+                      (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                       name TEXT,
+                       precision REAL,
+                       recall REAL,
+                       f1_score REAL,
+                       accuracy REAL,
+                       timestamp TEXT)''')
+        
+        # Check for missing columns and add them if needed
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(RecognitionMetrics)")
+        existing_columns = [column[1] for column in cursor.fetchall()]
+        
+        required_columns = ['precision', 'recall', 'f1_score', 'accuracy']
+        for column in required_columns:
+            if column not in existing_columns:
+                conn.execute(f"ALTER TABLE RecognitionMetrics ADD COLUMN {column} REAL DEFAULT 0")
+        
+        conn.commit()
+    finally:
+        conn.close()
+
 @app.route('/metrics')
 def view_metrics():
+    # First ensure database is properly initialized
+    initialize_databases()
+    
     conn = sqlite3.connect('recognition_metrics.db')
     conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    cursor = cur.execute("SELECT name, precision, f1_score, timestamp FROM RecognitionMetrics ORDER BY timestamp DESC")
-    metrics = cur.fetchall()
-    conn.close()
-    return render_template('RecognitionMetrics.html', metrics=metrics)
+    
+    try:
+        # Check which columns exist
+        cur = conn.cursor()
+        cur.execute("PRAGMA table_info(RecognitionMetrics)")
+        columns = [column[1] for column in cur.fetchall()]
+        has_columns = {
+            'precision': 'precision' in columns,
+            'recall': 'recall' in columns,
+            'f1_score': 'f1_score' in columns,
+            'accuracy': 'accuracy' in columns
+        }
+        
+        # Build dynamic query based on available columns
+        select_parts = ["strftime('%Y-%m-%d %H:%M', timestamp) as formatted_time", "name"]
+        
+        if has_columns['precision']:
+            select_parts.append("ROUND(precision*100, 2) as precision_pct")
+        else:
+            select_parts.append("0 as precision_pct")
+            
+        if has_columns['recall']:
+            select_parts.append("ROUND(recall*100, 2) as recall_pct")
+        else:
+            select_parts.append("0 as recall_pct")
+            
+        if has_columns['f1_score']:
+            select_parts.append("ROUND(f1_score*100, 2) as f1_pct")
+        else:
+            select_parts.append("0 as f1_pct")
+            
+        if has_columns['accuracy']:
+            select_parts.append("ROUND(accuracy*100, 2) as accuracy_pct")
+        else:
+            select_parts.append("0 as accuracy_pct")
+        
+        query = f"""
+            SELECT {', '.join(select_parts)}
+            FROM RecognitionMetrics 
+            ORDER BY timestamp DESC
+            LIMIT 100
+        """
+        
+        cur.execute(query)
+        recent_metrics = cur.fetchall()
+        
+        # Get summary statistics
+        avg_parts = []
+        if has_columns['precision']:
+            avg_parts.append("ROUND(AVG(precision)*100, 2) as avg_precision")
+        else:
+            avg_parts.append("0 as avg_precision")
+            
+        if has_columns['recall']:
+            avg_parts.append("ROUND(AVG(recall)*100, 2) as avg_recall")
+        else:
+            avg_parts.append("0 as avg_recall")
+            
+        if has_columns['f1_score']:
+            avg_parts.append("ROUND(AVG(f1_score)*100, 2) as avg_f1")
+        else:
+            avg_parts.append("0 as avg_f1")
+            
+        if has_columns['accuracy']:
+            avg_parts.append("ROUND(AVG(accuracy)*100, 2) as avg_accuracy")
+        else:
+            avg_parts.append("0 as avg_accuracy")
+        
+        summary_query = f"""
+            SELECT 
+                COUNT(*) as total_recognitions,
+                {', '.join(avg_parts)}
+            FROM RecognitionMetrics
+        """
+        
+        cur.execute(summary_query)
+        summary = cur.fetchone()
+        
+        # Get metrics by person
+        person_query = f"""
+            SELECT 
+                name,
+                COUNT(*) as recognition_count,
+                {', '.join(avg_parts)}
+            FROM RecognitionMetrics
+            GROUP BY name
+            ORDER BY recognition_count DESC
+        """
+        
+        cur.execute(person_query)
+        metrics_by_person = cur.fetchall()
+        
+    finally:
+        conn.close()
+    
+    return render_template('RecognitionMetrics.html',
+                         recent_metrics=recent_metrics,
+                         summary=summary,
+                         metrics_by_person=metrics_by_person)
 
 if __name__ == '__main__':
     app.run(debug=True)
