@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Metrics Summary</title>
+    <style>
+        .stats { display: flex; margin-bottom: 30px; }
+        .stat-box { flex: 1; text-align: center; padding: 20px; background: #f5f5f5; margin: 0 10px; }
+        .stat-value { font-size: 24px; font-weight: bold; }
+        .daily-stats { width: 100%; border-collapse: collapse; }
+        .daily-stats th, .daily-stats td { padding: 10px; border: 1px solid #ddd; text-align: center; }
+    </style>
+</head>
+<body>
+    <h1>Recognition Metrics Summary</h1>
+    
+    <div class="stats">
+        <div class="stat-box">
+            <div class="stat-label">Total Attempts</div>
+            <div class="stat-value">{{ total }}</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Accuracy</div>
+            <div class="stat-value">{{ accuracy }}%</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Avg Confidence</div>
+            <div class="stat-value">{{ avg_confidence }}%</div>
+        </div>
+        <div class="stat-box">
+            <div class="stat-label">Spoofing Rate</div>
+            <div class="stat-value">{{ spoof_rate }}%</div>
+        </div>
+    </div>
+    
+    <h2>Last 7 Days Activity</h2>
+    <table class="daily-stats">
+        <tr>
+            <th>Date</th>
+            <th>Total Attempts</th>
+            <th>Correct</th>
+            <th>Spoofing</th>
+            <th>Accuracy</th>
+        </tr>
+        {% for day in daily_stats %}
+        <tr>
+            <td>{{ day['day'] }}</td>
+            <td>{{ day['attempts'] }}</td>
+            <td>{{ day['correct'] }}</td>
+            <td>{{ day['spoofing'] }}</td>
+            <td>{{ "%.1f"|format(day['correct']/day['attempts']*100 if day['attempts'] > 0 else 0) }}%</td>
+        </tr>
+        {% endfor %}
+    </table>
+    
+    <p><a href="/metrics">View Detailed Metrics</a></p>
+</body>
+</html>
