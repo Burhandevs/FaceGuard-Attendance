@@ -6,65 +6,45 @@ from datetime import datetime, timedelta
 conn = sqlite3.connect('information.db')
 cursor = conn.cursor()
 
-# Configuration
-TOTAL_ENTRIES = 100  # Number of new recognition logs to add
-PASS_RATE = 0.95     # 95% passing rate
+# Student names (modify as needed)
+students = ['Burhanuddin', 'Mudasir', 'Wajid', 'Wali', 'Hasnain', 'Ali']
 
-# Student names (should match your training data)
-KNOWN_STUDENTS = ['Burhanuddin', 'Mudasir', 'Wajid', 'Wali', 'Hasnain', 'Ali']
+def generate_april_days(count):
+    """Generate random days in April 2025"""
+    return random.sample(range(1, 31), min(count, 30))  # Max 30 unique days
 
-# Liveness check options
-LIVENESS_PASS = ['Passed']
-LIVENESS_FAIL = ['Failed - Eyes closed', 'Failed - Photo', 'Failed - Mask']
-
-def generate_april_2025_date():
-    """Generate random date in April 2025"""
-    day = random.randint(1, 30)
-    return f"2025-04-{day:02d}"
-
-def generate_timestamp(base_date):
-    """Generate realistic timestamp (8AM-5PM)"""
+def generate_work_time():
+    """Generate realistic work hours (8AM-5PM)"""
     hour = random.choices(
-        [8,9,10,11,12,13,14,15,16],
-        weights=[5,20,15,5,5,20,15,5,5],  # More at 9AM and 1PM
+        [8,9,10,11,12,13,14,15,16], 
+        weights=[5,20,15,5,5,20,15,5,5],  # Peaks at 9AM and 1PM
         k=1
     )[0]
-    return f"{base_date} {hour:02d}:{random.randint(0,59):02d}:{random.randint(0,59):02d}"
+    return f"{hour:02d}:{random.randint(0,59):02d}"
 
-print("Adding high-quality recognition logs...")
+# Generate 60 new attendance records
 added_count = 0
+april_days = generate_april_days(60)
 
-for _ in range(TOTAL_ENTRIES):
-    # Generate random April 2025 date
-    date = generate_april_2025_date()
-    timestamp = generate_timestamp(date)
+for day in april_days:
+    date = f"2025-04-{day:02d}"
     
-    # 95% chance of successful recognition
-    if random.random() < PASS_RATE:
-        name = random.choice(KNOWN_STUDENTS)
-        recognition_result = "Correct"
-        is_spoofing = 0
-        confidence = round(random.uniform(0.90, 0.99), 2)  # High confidence
-        liveness_check = random.choice(LIVENESS_PASS)
-    else:
-        name = "Unknown"
-        recognition_result = "Incorrect"
-        is_spoofing = 1
-        confidence = round(random.uniform(0.10, 0.40), 2)  # Low confidence
-        liveness_check = random.choice(LIVENESS_FAIL)
-    
-    # Insert recognition log
-    cursor.execute(
-        """INSERT INTO RecognitionLogs 
-        (timestamp, name, recognition_result, is_spoofing, confidence, liveness_check)
-        VALUES (?, ?, ?, ?, ?, ?)""",
-        (timestamp, name, recognition_result, is_spoofing, confidence, liveness_check)
-    )
-    
-    added_count += 1
-    if added_count % 10 == 0:
-        print(f"Added {added_count} entries...")
+    # Each student has 70% chance of attending on each day
+    for student in students:
+        if random.random() < 0.7:  # 70% attendance probability
+            time = generate_work_time()
+            
+            # Insert only if not already exists (same student+date)
+            cursor.execute(
+                """INSERT OR IGNORE INTO Attendance 
+                (NAME, Time, Date) VALUES (?, ?, ?)""",
+                (student, time, date)
+            )
+            
+            if cursor.rowcount > 0:  # If new record was inserted
+                added_count += 1
+                print(f"Added: {student} on {date} at {time}")
 
 conn.commit()
 conn.close()
-print(f"\nSuccessfully added {added_count} recognition logs with {PASS_RATE*100}% pass rate!")
+print(f"\nSuccessfully added {added_count} new attendance records for April 2025!")
