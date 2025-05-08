@@ -838,7 +838,7 @@ def metrics():
         conn.close()
         return render_template('RecognitionMetrics.html', rows=rows, names=names, selected_date=date_filter, selected_name=name_filter, selected_result=result_filter)
 
-@app.route('/metrics_summary')
+@app.route('/metrics_summary', methods=["GET", "POST"])
 def metrics_summary():
     conn = sqlite3.connect('information.db')
     conn.row_factory = sqlite3.Row
