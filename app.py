@@ -473,21 +473,6 @@ def recognize():
     else:
         return render_template('main.html')
 
-@app.route('/login',methods = ['POST'])
-def login():
-    json_data = json.loads(request.data.decode())
-    username = json_data['username']
-    password = json_data['password']
-    df= pd.read_csv('cred.csv')
-    if len(df.loc[df['username'] == username]['password'].values) > 0:
-        if df.loc[df['username'] == username]['password'].values[0] == password:
-            session['username'] = username
-            return 'success'
-        else:
-            return 'failed'
-    else:
-        return 'failed'
-
 @app.route('/checklogin')
 def checklogin():
     if 'username' in session:
