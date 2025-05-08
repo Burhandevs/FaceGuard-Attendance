@@ -19,12 +19,7 @@ app.secret_key = 'supersecretkey'
 # Initialize performance metrics database
 def init_performance_db():
     conn = sqlite3.connect('recognition_metrics.db')
-    conn.execute('''CREATE TABLE IF NOT EXISTS RecognitionMetrics 
-                    (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                     name TEXT,
-                     precision REAL,
-                     f1_score REAL,
-                     timestamp TEXT)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS RecognitionMetrics (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, precision REAL, f1_score REAL, timestamp TEXT)''')
     conn.commit()
     conn.close()
 
@@ -178,18 +173,10 @@ def recognize():
         def initialize_databases():
             # Initialize Attendance database
             conn_attendance = sqlite3.connect('information.db')
-            conn_attendance.execute('''CREATE TABLE IF NOT EXISTS Attendance 
-                                    (NAME TEXT, Time TEXT, Date TEXT, UNIQUE(NAME, Date))''')
+            conn_attendance.execute('''CREATE TABLE IF NOT EXISTS Attendance (NAME TEXT, Time TEXT, Date TEXT, UNIQUE(NAME, Date))''')
             
             # Initialize Recognition Metrics database
-            conn_attendance.execute('''CREATE TABLE IF NOT EXISTS RecognitionLogs 
-                                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                                      timestamp TEXT,
-                                      name TEXT,
-                                      recognition_result TEXT,
-                                      is_spoofing BOOLEAN,
-                                      confidence REAL,
-                                      liveness_check TEXT)''')
+            conn_attendance.execute('''CREATE TABLE IF NOT EXISTS RecognitionLogs (id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT, name TEXT, recognition_result TEXT, is_spoofing BOOLEAN, confidence REAL, liveness_check TEXT)''')
             conn_attendance.commit()
             conn_attendance.close()
         
@@ -587,16 +574,7 @@ def metrics_summary():
     avg_confidence = cur.fetchone()['avg_confidence'] or 0
     
     # Recent activity
-    cur.execute("""
-        SELECT date(timestamp) as day, 
-               COUNT(*) as attempts,
-               SUM(CASE WHEN recognition_result = 'Correct' THEN 1 ELSE 0 END) as correct,
-               SUM(CASE WHEN is_spoofing = 1 THEN 1 ELSE 0 END) as spoofing
-        FROM RecognitionLogs
-        GROUP BY date(timestamp)
-        ORDER BY day DESC
-        LIMIT 7
-    """)
+    cur.execute(""" SELECT date(timestamp) as day, COUNT(*) as attempts, SUM(CASE WHEN recognition_result = 'Correct' THEN 1 ELSE 0 END) as correct, SUM(CASE WHEN is_spoofing = 1 THEN 1 ELSE 0 END) as spoofing FROM RecognitionLogs GROUP BY date(timestamp) ORDER BY day DESC LIMIT 7 """)
     daily_stats = cur.fetchall()
     
     conn.close()
