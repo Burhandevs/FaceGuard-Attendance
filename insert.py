@@ -36,7 +36,7 @@ for day in april_days:
             
             # Insert only if not already exists (same student+date)
             cursor.execute(
-                """INSERT OR IGNORE INTO Attendance 
+                """INSERT INTO Attendance 
                 (NAME, Time, Date) VALUES (?, ?, ?)""",
                 (student, time, date)
             )
