@@ -573,7 +573,7 @@ def metrics_summary():
     
     return render_template('MetricsSummary.html', total=total, correct=correct, spoofing=spoofing, accuracy=round(accuracy, 1), spoof_rate=round(spoof_rate, 1), avg_confidence=round(avg_confidence * 100, 1), daily_stats=daily_stats)
 
-
+# Calculate percentages
 @app.route('/whole',methods=["GET","POST"])
 def whole():
     today=date.today()
