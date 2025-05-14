@@ -25,3 +25,16 @@ Key Features:
 ✅ Admin dashboard for analytics
 
 Built with Python, OpenCV, dlib, and Flask, this system ensures secure and automated attendance marking while maintaining resistance against common facial spoofing techniques.
+
+Why This Stands Out:
+
+Anti-Spoofing Focus: Unlike basic face recognition systems, this actively detects liveness.
+Suggested Tags:
+
+face-recognition anti-spoofing attendance-system flask opencv liveness-detection computer-vision
+
+Metrics Tracking: Logs precision, F1-score, and spoofing attempts for transparency.
+
+User-Friendly: Simple web interface for admins to view attendance & analytics.
+
+Perfect for workplaces, universities, or any organization needing secure, automated attendance.
